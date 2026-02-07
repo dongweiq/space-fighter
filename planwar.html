@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>太空战机：无限火力 - 整数修正版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.font.im/css2?family=Orbitron:wght@400;700&display=swap');
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Orbitron', 'Microsoft YaHei', sans-serif;
+            touch-action: none;
+        }
+        canvas {
+            display: block;
+        }
+        .retro-text {
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.7);
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .boss-health-container {
+            width: 300px;
+            height: 12px;
+            background: rgba(255, 0, 0, 0.2);
+            border: 2px solid rgba(255, 0, 0, 0.5);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .warning-alert {
+            animation: pulse 0.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; color: #ff0000; transform: scale(1); }
+            50% { opacity: 0.5; color: #ffffff; transform: scale(1.1); }
+        }
+        .portal-active {
+            box-shadow: 0 -20px 50px rgba(0, 255, 255, 0.4);
+            border-top: 3px solid rgba(0, 255, 255, 0.8);
+            background: linear-gradient(to top, rgba(0, 255, 255, 0.2), transparent);
+        }
+        .metal-tag {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            color: white;
+        }
+        .bg-copper { background: #b87333; }
+        .bg-iron { background: #71717a; }
+        .bg-uranium { background: #166534; }
+        #nuke-flash {
+            position: fixed;
+            inset: 0;
+            background: white;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 100;
+        }
+        /* 屏幕变暗遮罩 (没电时) */
+        #darkness-overlay {
+            position: fixed;
+            inset: 0;
+            background: black;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 5;
+            transition: opacity 0.5s ease;
+        }
+        /* 红色危机警报遮罩 */
+        #critical-overlay {
+            position: fixed;
+            inset: 0;
+            box-shadow: inset 0 0 100px 50px rgba(220, 38, 38, 0.6); 
+            pointer-events: none;
+            z-index: 90;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .critical-active {
+            animation: critical-pulse 0.8s infinite alternate;
+        }
+        @keyframes critical-pulse {
+            0% { opacity: 0.2; }
+            100% { opacity: 0.8; }
+        }
+
+        .nuke-active {
+            animation: flash-animation 1s ease-out;
+        }
+        @keyframes flash-animation {
+            0% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        
+        /* 备用电源倒计时样式 */
+        #backup-timer {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 4rem;
+            font-weight: 900;
+            color: rgba(220, 38, 38, 0.8);
+            pointer-events: none;
+            z-index: 80;
+            text-shadow: 0 0 20px red;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="nuke-flash"></div>
+    <div id="darkness-overlay"></div>
+    <div id="critical-overlay"></div>
+    
+    <!-- 备用电源大警告 -->
+    <div id="backup-overlay" class="hidden fixed inset-0 z-50 flex flex-col items-center justify-center pointer-events-none">
+        <div class="bg-black/90 p-8 rounded-3xl border-4 border-red-600 shadow-[0_0_100px_rgba(220,38,38,0.8)] text-center animate-pulse">
+            <h2 class="text-5xl font-black text-red-500 mb-4 tracking-widest retro-text">⚠️ 警告 ⚠️</h2>
+            <h3 class="text-3xl text-white font-bold mb-6">已切换备用电源</h3>
+            <p class="text-red-400 text-xl mb-4">请在 <span class="text-6xl text-white font-black mx-2 retro-text" id="backup-countdown-text">60</span> 秒内</p>
+            <p class="text-2xl text-white font-bold uppercase tracking-[0.5em] bg-red-600 py-2 rounded">返回基地</p>
+        </div>
+    </div>
+
+    <div id="ui-container" class="fixed inset-0 pointer-events-none flex flex-col items-center justify-center z-10 text-white">
+        
+        <!-- 开始菜单 -->
+        <div id="start-menu" class="pointer-events-auto glass-panel p-8 rounded-2xl flex flex-col items-center gap-6 max-w-md w-full mx-4 shadow-2xl border border-white/5">
+            <h1 class="text-4xl md:text-5xl font-bold text-cyan-400 retro-text tracking-widest text-center">无限征途</h1>
+            <p class="text-gray-400 text-center mb-4 text-xs uppercase tracking-widest text-yellow-400">备用电源系统 | 1分钟极限求生</p>
+            <button onclick="startGame()" class="w-full py-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition-all font-bold uppercase tracking-wider text-sm">启动战机引擎</button>
+        </div>
+
+        <!-- 游戏 HUD -->
+        <div id="hud" class="hidden absolute top-0 left-0 right-0 p-4 pointer-events-none flex flex-col items-center gap-4">
+            <div class="w-full flex justify-between items-start">
+                <div class="flex flex-col gap-1 text-left">
+                    <div class="text-cyan-400 text-xl font-bold tracking-tighter">第 <span id="level-val">1</span> 关</div>
+                    <div class="flex gap-1 mb-1">
+                        <span class="metal-tag bg-copper">铜:<span id="inv-copper">0</span></span>
+                        <span class="metal-tag bg-iron">铁:<span id="inv-iron">0</span></span>
+                        <span class="metal-tag bg-uranium">铀:<span id="inv-uranium">0</span></span>
+                    </div>
+                    <div class="text-yellow-400 text-sm font-bold tracking-wide">金币: $<span id="gold-val">0</span></div>
+                    <div class="text-white text-[10px]">杀敌: <span id="kill-progress">0</span> / <span id="kill-target">10</span></div>
+                    <div class="flex items-center gap-2 mt-1">
+                        <span class="text-[10px] text-red-400 font-bold uppercase w-8">HP</span>
+                        <div class="w-32 h-2 bg-gray-800 rounded-full border border-white/10 overflow-hidden text-left">
+                            <div id="health-bar" class="h-full bg-red-500 transition-all duration-300"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex flex-col items-end gap-1 text-right">
+                    <div id="ammo-display" class="text-yellow-400 font-bold text-lg text-white">弹药: 500</div>
+                    <div id="fire-rate-display" class="text-green-400 text-[10px] font-bold">射速: 10/s</div>
+                    <div id="fuel-display" class="text-orange-400 font-bold text-sm text-right">燃料: 500ml</div>
+                    
+                    <!-- 电量条 -->
+                    <div class="flex items-center justify-end gap-2 w-full">
+                         <div class="w-24 h-1.5 bg-gray-800 rounded-full border border-white/10 overflow-hidden">
+                            <div id="battery-bar" class="h-full bg-blue-500 transition-all duration-300"></div>
+                        </div>
+                        <span class="text-[10px] text-blue-400 font-bold uppercase w-8">PWR</span>
+                    </div>
+                    
+                    <div id="base-hint" class="hidden text-cyan-400 text-[10px] animate-pulse font-bold">基地补给医疗中...</div>
+                    <div id="status-alert" class="hidden warning-alert text-xs font-bold uppercase">警告：备用电源启用！</div>
+                </div>
+            </div>
+            
+            <div id="boss-hud" class="hidden flex flex-col items-center gap-1">
+                <div class="text-red-500 font-bold text-sm tracking-widest uppercase">BOSS 出现</div>
+                <div class="boss-health-container">
+                    <div id="boss-health-bar" class="h-full bg-red-600 transition-all duration-100 text-left"></div>
+                </div>
+            </div>
+
+            <!-- 操作按钮组 -->
+            <div class="absolute bottom-4 left-4 flex flex-col gap-2 pointer-events-auto">
+                <div class="flex gap-2">
+                    <button onclick="goToBase('upgrade')" class="px-3 py-2 bg-slate-800/90 border border-cyan-500/50 text-cyan-400 text-[10px] font-bold rounded hover:bg-cyan-900 transition-all">升级</button>
+                    <button onclick="goToBase('mall')" class="px-3 py-2 bg-slate-800/90 border border-yellow-500/50 text-yellow-400 text-[10px] font-bold rounded hover:bg-yellow-900 transition-all">商场</button>
+                    <button onclick="goToBase('craft')" class="px-3 py-2 bg-slate-800/90 border border-green-500/50 text-green-400 text-[10px] font-bold rounded hover:bg-green-900 transition-all">制作</button>
+                </div>
+                <button onclick="useNuke()" id="nuke-btn" class="flex items-center justify-between px-4 py-3 bg-red-900/80 border-2 border-red-500 text-white rounded-xl shadow-lg hover:bg-red-700 transition-all text-left">
+                    <div class="flex flex-col items-start">
+                        <span class="text-[10px] font-bold uppercase leading-tight">核武打击 (核弹)</span>
+                        <span class="text-[8px] opacity-70">按 空格键 释放</span>
+                    </div>
+                    <span id="nuke-count" class="text-2xl font-bold ml-4">0</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 基地菜单面板 -->
+        <div id="base-menu" class="hidden pointer-events-auto glass-panel p-6 rounded-3xl flex flex-col items-center gap-4 max-w-2xl w-full mx-4 shadow-2xl border border-cyan-500/30">
+            <div class="flex w-full gap-2 border-b border-white/10 pb-2">
+                <button onclick="switchTab('upgrade')" class="flex-1 py-2 text-xs font-bold rounded text-white bg-cyan-900/50" id="tab-upgrade">战机整备</button>
+                <button onclick="switchTab('mall')" class="flex-1 py-2 text-xs font-bold rounded text-gray-400" id="tab-mall">资源商场</button>
+                <button onclick="switchTab('craft')" class="flex-1 py-2 text-xs font-bold rounded text-gray-400" id="tab-craft">科技制作</button>
+            </div>
+
+            <div id="section-upgrade" class="w-full space-y-2">
+                <div class="text-yellow-400 text-center font-bold mb-2 uppercase text-xs">可用金币: <span id="base-gold-val">0</span></div>
+                <div class="grid grid-cols-1 gap-2">
+                    <div class="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/10 text-white">
+                        <div class="text-[11px]">强化钛金装甲 (HP) <span id="up-hp-val" class="text-gray-500 ml-2">100</span></div>
+                        <button onclick="upgrade('hp')" class="px-3 py-1 bg-green-900/50 border border-green-500/50 text-green-400 text-[10px] rounded hover:bg-green-700">$200</button>
+                    </div>
+                    <div class="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/10 text-white">
+                        <div class="text-[11px]">扩容量子油箱 (FUEL) <span id="up-fuel-val" class="text-gray-500 ml-2">500</span></div>
+                        <button onclick="upgrade('fuel')" class="px-3 py-1 bg-green-900/50 border border-green-500/50 text-green-400 text-[10px] rounded hover:bg-green-700">$150</button>
+                    </div>
+                    <div class="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/10 text-white">
+                        <div class="text-[11px]">高能聚合电池 (PWR) <span id="up-batt-val" class="text-gray-500 ml-2">100</span></div>
+                        <button onclick="upgrade('battery')" class="px-3 py-1 bg-green-900/50 border border-green-500/50 text-green-400 text-[10px] rounded hover:bg-green-700">$180</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="section-mall" class="hidden w-full space-y-4">
+                <div class="grid grid-cols-3 gap-2 text-center text-white">
+                    <div class="bg-copper/20 p-3 rounded-xl border border-copper/50">
+                        <div class="text-[#b87333] font-bold text-[10px]">铜块</div>
+                        <div class="text-white text-lg font-bold" id="shop-copper">0</div>
+                        <button onclick="sell('copper')" class="mt-2 w-full py-1 bg-[#b87333] text-white text-[10px] rounded hover:opacity-80">卖出 $10</button>
+                    </div>
+                    <div class="bg-iron/20 p-3 rounded-xl border border-iron/50">
+                        <div class="text-gray-400 font-bold text-[10px]">铁锭</div>
+                        <div class="text-white text-lg font-bold" id="shop-iron">0</div>
+                        <button onclick="sell('iron')" class="mt-2 w-full py-1 bg-gray-600 text-white text-[10px] rounded hover:opacity-80">卖出 $50</button>
+                    </div>
+                    <div class="bg-uranium/20 p-3 rounded-xl border border-uranium/50">
+                        <div class="text-[#166534] font-bold text-[10px]">铀核心</div>
+                        <div class="text-white text-lg font-bold" id="shop-uranium">0</div>
+                        <button onclick="sell('uranium')" class="mt-2 w-full py-1 bg-[#166534] text-white text-[10px] rounded hover:opacity-80">卖出 $200</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="section-craft" class="hidden w-full space-y-3">
+                <div class="bg-red-900/20 p-3 rounded-xl border border-red-500/30 flex justify-between items-center text-left text-white">
+                    <div>
+                        <div class="text-red-400 text-[11px] font-bold">战略级核弹 (清屏)</div>
+                        <div class="text-[9px] text-gray-500 italic">需求: 50铀, 100铜, 100铁</div>
+                    </div>
+                    <button onclick="craft('nuke')" id="btn-craft-nuke" class="px-4 py-1 bg-red-600 text-white text-[10px] rounded font-bold">制作</button>
+                </div>
+                <div class="bg-white/5 p-3 rounded-xl border border-white/10 flex justify-between items-center text-left text-white">
+                    <div>
+                        <div class="text-white text-[11px] font-bold">纳米修复膜 (回血)</div>
+                        <div class="text-[9px] text-gray-400">需求: 50铜, 10铁</div>
+                    </div>
+                    <button onclick="craft('nano')" id="btn-craft-nano" class="px-4 py-1 bg-green-600 text-white text-[10px] rounded font-bold">制作</button>
+                </div>
+                <div id="craft-success" class="hidden text-green-400 text-center text-[10px] animate-bounce">制作成功！</div>
+            </div>
+
+            <button onclick="returnToGame()" class="w-full py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl font-bold uppercase tracking-widest text-xs">重返战场</button>
+        </div>
+
+        <!-- 游戏结束面板 -->
+        <div id="game-over" class="hidden pointer-events-auto glass-panel p-10 rounded-2xl flex flex-col items-center gap-6 shadow-2xl border border-red-500/30 text-center text-white">
+            <h2 class="text-4xl font-bold text-red-500 retro-text">战机损毁</h2>
+            <div class="text-gray-400 text-sm font-bold">复活需支付 <span class="text-yellow-400 font-bold">50 金币</span></div>
+            <button id="revive-btn" onclick="revivePlayer()" class="px-10 py-4 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl transition-all uppercase tracking-widest shadow-lg">立即复活</button>
+            <p id="revive-fail-msg" class="hidden text-red-400 text-xs font-bold">金币不足！任务终止</p>
+            <button onclick="resetGame()" class="text-gray-500 text-xs hover:text-white transition-colors underline">返回主界面</button>
+        </div>
+    </div>
+
+    <!-- 基地视觉层 -->
+    <div id="base-portal" class="hidden fixed bottom-0 left-0 right-0 h-24 pointer-events-none flex items-center justify-center portal-active z-0">
+        <div class="text-cyan-400/20 font-bold text-2xl tracking-[2em] uppercase">Supply Base Portal</div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const getEl = (id) => document.getElementById(id);
+
+        let gameState = 'menu';
+        let currentLevel = 1;
+        let killsInLevel = 0;
+        let frameCount = 0;
+        let loopId = null;
+
+        let player;
+        let bullets = [], enemyBullets = [], enemies = [], obstacles = [], powerups = [], particles = [], boss = null;
+        let mousePos = { x: 0, y: 0 };
+
+        // --- UI 助手 ---
+        function safeUpdateText(id, text) { const el = getEl(id); if (el) el.innerText = text; }
+        function safeUpdateWidth(id, percent) { const el = getEl(id); if (el) el.style.width = percent + '%'; }
+
+        // --- 核心配置 ---
+        const MAX_AMMO_LIMIT = BigInt("10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+        const upgradeCosts = { hp: 200, fuel: 150, supply: 300, fire: 500, battery: 180 };
+        const REVIVE_COST = 50;
+        const RESOURCE_MULTIPLIER = 10000;
+
+        // --- 环境尺寸初始化 ---
+        function initSize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            mousePos.x = canvas.width / 2;
+            mousePos.y = canvas.height - 150;
+        }
+        window.addEventListener('resize', initSize);
+        initSize();
+
+        window.addEventListener('mousemove', (e) => { mousePos.x = e.clientX; mousePos.y = e.clientY; });
+        window.addEventListener('touchmove', (e) => { if (e.touches[0]) { mousePos.x = e.touches[0].clientX; mousePos.y = e.touches[0].clientY; e.preventDefault(); } }, { passive: false });
+        window.addEventListener('keydown', (e) => { if (e.code === 'Space') useNuke(); });
+
+        // --- 核心实体类 ---
+
+        class Obstacle {
+            constructor() {
+                const rand = Math.random();
+                if (rand < 0.6) { this.type = 'small'; this.hp = 50; this.maxHp = 50; this.size = 30; this.speed = 2.2; this.metal = 'copper'; }
+                else if (rand < 0.9) { this.type = 'medium'; this.hp = 75; this.maxHp = 75; this.size = 55; this.speed = 1.5; this.metal = 'iron'; }
+                else { this.type = 'large'; this.hp = 100; this.maxHp = 100; this.size = 90; this.speed = 0.8; this.metal = 'uranium'; }
+                this.x = Math.random() * (canvas.width - this.size) + this.size/2;
+                this.y = -100;
+                this.rot = 0;
+            }
+            update() { this.y += this.speed; this.rot += 0.02; }
+            draw() {
+                ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.rot);
+                ctx.fillStyle = this.type === 'large' ? '#14532d' : (this.type === 'medium' ? '#3f3f46' : '#92400e');
+                ctx.fillRect(-this.size/2, -this.size/2, this.size, this.size);
+                ctx.strokeStyle = "rgba(255,255,255,0.2)"; ctx.strokeRect(-this.size/2, -this.size/2, this.size, this.size);
+                ctx.restore();
+                ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(this.x - this.size/2, this.y - this.size/2 - 10, this.size, 4);
+                ctx.fillStyle = '#ef4444'; ctx.fillRect(this.x - this.size/2, this.y - this.size/2 - 10, this.size * (this.hp/this.maxHp), 4);
+            }
+        }
+
+        class Player {
+            constructor() {
+                this.x = canvas.width / 2;
+                this.y = canvas.height - 150;
+                this.size = 25; 
+                this.ammo = BigInt(500); this.gold = 0;
+                this.inventory = { copper: 0, iron: 0, uranium: 0 };
+                this.perks = { nano: false, rounds: false }; this.nukes = 0;
+                this.maxHealth = 100; this.health = 100;
+                this.maxFuel = 500; this.fuel = 500;
+                this.maxBattery = 100; this.battery = 100; 
+                this.maxBackupFrames = 3600; // 60秒
+                this.backupTimer = this.maxBackupFrames; 
+                this.fireRateLevel = 0; this.multiShot = 1; this.lastFired = 0;
+                this.inBase = false;
+            }
+            update() {
+                let moveSpeed = 0.15;
+                if (this.battery <= 0) {
+                    if (this.backupTimer > 0) {
+                        moveSpeed = 0.05; 
+                        this.backupTimer--;
+                    } else {
+                        moveSpeed = 0; 
+                        this.health -= 0.5; 
+                    }
+                }
+
+                this.x += (mousePos.x - this.x) * moveSpeed;
+                this.y += (mousePos.y - this.y) * moveSpeed;
+                
+                this.inBase = (this.y > canvas.height - 100);
+                if (this.inBase) {
+                    if (this.ammo < 1000000000000n) this.ammo += BigInt(100000);
+                    if (this.fuel < this.maxFuel) this.fuel += 5;
+                    if (this.health < this.maxHealth) this.health = Math.min(this.maxHealth, this.health + 5/60);
+                    if (this.battery < this.maxBattery) this.battery = Math.min(this.maxBattery, this.battery + 1.0); 
+                    this.backupTimer = this.maxBackupFrames; 
+                } else {
+                    if (this.fuel > 0) this.fuel -= 0.08; else this.health -= 5/60;
+                    this.battery = Math.max(0, this.battery - 0.08); 
+                    if (this.perks.nano && this.health < this.maxHealth) this.health += 0.01;
+                }
+
+                const currentRate = 10 * Math.pow(100, this.fireRateLevel / 100);
+                // 开火条件：必须有电或备用电源
+                if (!this.inBase && this.fuel > 0 && this.ammo > 0n && (this.battery > 0 || this.backupTimer > 0)) {
+                    this.lastFired++;
+                    const framesPerShot = currentRate <= 60 ? Math.floor(60 / currentRate) : 1;
+                    if (this.lastFired >= framesPerShot) { this.fire(currentRate); this.lastFired = 0; }
+                }
+                safeUpdateText('fire-rate-display', `射速: ${Math.floor(currentRate)}/s | 宽度: ${this.multiShot}`);
+            }
+            fire(rate) {
+                const shotsPerFrame = rate > 60 ? Math.ceil(rate / 60) : 1;
+                const cols = this.multiShot; 
+                const startX = this.x - ((cols - 1) * 20) / 2;
+                for (let s = 0; s < shotsPerFrame; s++) {
+                    for (let i = 0; i < cols; i++) {
+                        if (this.ammo <= 0n) break;
+                        bullets.push(new Bullet(startX + i * 20, this.y - 20, 0, -18));
+                        this.ammo -= 1n;
+                        this.fuel -= 0.0005; 
+                    }
+                }
+            }
+            draw() {
+                ctx.save(); ctx.translate(this.x, this.y);
+                if (this.inBase) { ctx.shadowBlur = 20; ctx.shadowColor = '#0ff'; }
+                if (this.battery <= 0 && this.backupTimer <= 0) {
+                    ctx.fillStyle = '#111'; ctx.strokeStyle = '#333'; 
+                } else if (this.battery <= 0) {
+                    ctx.fillStyle = '#374151'; ctx.strokeStyle = '#ef4444'; 
+                } else {
+                    ctx.fillStyle = this.fuel > 0 ? (this.perks.rounds ? '#fbbf24' : '#00f2ff') : '#444';
+                    ctx.strokeStyle = "white"; 
+                }
+                ctx.beginPath(); ctx.moveTo(0, -this.size); ctx.lineTo(this.size, this.size); ctx.lineTo(0, this.size/2); ctx.lineTo(-this.size, this.size); ctx.closePath(); ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        class Bullet {
+            constructor(x, y, vx, vy, isEnemy = false) { this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.isEnemy = isEnemy; }
+            update() { this.x += this.vx; this.y += this.vy; }
+            draw() { ctx.fillStyle = this.isEnemy ? '#ff3300' : '#00ffff'; ctx.beginPath(); ctx.arc(this.x, this.y, 4, 0, Math.PI * 2); ctx.fill(); }
+        }
+
+        class Enemy {
+            constructor() { this.size = 25; this.x = Math.random() * (canvas.width - 50) + 25; this.y = -50; this.speed = 2.5 + (currentLevel * 0.1); }
+            update() { this.y += this.speed; }
+            draw() { ctx.fillStyle = '#f40'; ctx.beginPath(); ctx.moveTo(this.x, this.y + this.size); ctx.lineTo(this.x + this.size, this.y - this.size); ctx.lineTo(this.x - this.size, this.y - this.size); ctx.closePath(); ctx.fill(); }
+        }
+
+        class Boss {
+            constructor(level) { this.width = 150 + level*10; this.height = 80; this.x = canvas.width/2; this.y = -100; this.maxHp = level*1000; this.hp = this.maxHp; this.lastFired = 0; }
+            update() { 
+                if (this.y < 120) this.y += 1.2; else this.x += Math.sin(frameCount/50) * 2;
+                this.lastFired++; 
+                if (this.lastFired > 90) { 
+                    const count = Math.min(8, 3 + Math.floor(currentLevel / 4));
+                    for(let i=0; i < count; i++) { enemyBullets.push(new Bullet(this.x + (i - (count-1)/2)*40, this.y + 40, 0, 5, true)); }
+                    this.lastFired = 0; 
+                } 
+            }
+            draw() { ctx.save(); ctx.translate(this.x, this.y); ctx.fillStyle = '#6366f1'; ctx.fillRect(-this.width/2, -this.height/2, this.width, this.height); ctx.strokeStyle = '#f05'; ctx.lineWidth = 4; ctx.strokeRect(-this.width/2, -this.height/2, this.width, this.height); ctx.restore(); safeUpdateWidth('boss-health-bar', (this.hp / this.maxHp * 100)); }
+        }
+
+        class Powerup {
+            constructor(x, y, type = null, quantity = 1) { 
+                this.x = x; this.y = y; this.size = 15; 
+                const types = ['multi','heal','ammo','speed','fuel','gold','copper','iron','uranium']; 
+                this.type = type || types[Math.floor(Math.random() * types.length)];
+                this.quantity = quantity;
+            }
+            update() { this.y += 2.2; }
+            draw() { 
+                const colors = { multi: '#f0f', heal: '#f00', ammo: '#fbbf24', speed: '#0f0', fuel: '#f90', gold: '#fbbf24', copper: '#b87333', iron: '#777', uranium: '#166534' }; 
+                ctx.fillStyle = colors[this.type] || '#fff'; ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill(); 
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 9px Arial'; ctx.textAlign = 'center'; ctx.fillText(this.type[0].toUpperCase(), this.x, this.y + 3); 
+                if (this.quantity > 100) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke(); }
+            }
+        }
+
+        function createExplosion(x, y, color) { for (let i = 0; i < 8; i++) { particles.push({x, y, vx:(Math.random()-0.5)*10, vy:(Math.random()-0.5)*10, alpha:1, color, update(){this.x+=this.vx;this.y+=this.vy;this.alpha-=0.04;}, draw(){ctx.globalAlpha=this.alpha;ctx.fillStyle=this.color;ctx.beginPath();ctx.arc(this.x,this.y,2,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;}}); } }
+
+        function useNuke() {
+            if (player && player.nukes > 0 && gameState === 'playing' && !player.inBase && player.battery > 0) {
+                player.nukes--; getEl('nuke-flash').classList.add('nuke-active'); setTimeout(() => getEl('nuke-flash').classList.remove('nuke-active'), 1000);
+                enemies.forEach(e => { createExplosion(e.x, e.y, '#f40'); killsInLevel++; }); enemies = [];
+                obstacles.forEach(o => createExplosion(o.x, o.y, '#777')); obstacles = [];
+                if (boss) { boss.hp -= 3000; if (boss.hp <= 0) { createExplosion(boss.x, boss.y, '#6366f1'); boss = null; getEl('boss-hud').classList.add('hidden'); currentLevel++; killsInLevel = 0; } }
+                updateHUD();
+            }
+        }
+
+        function checkCollisions() {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const b = bullets[i];
+                let bulletHit = false;
+                if (boss && Math.abs(b.x - boss.x) < boss.width/2 && Math.abs(b.y - boss.y) < boss.height/2) {
+                    boss.hp -= 10; bullets.splice(i, 1);
+                    if (boss.hp <= 0) { 
+                        createExplosion(boss.x, boss.y, '#6366f1');
+                        const posTypes = ['multi','heal','ammo','speed','fuel','gold'];
+                        for (let k = 0; k < currentLevel*10; k++) {
+                            const angle = (Math.PI * 2 / (currentLevel*10)) * k; const dist = 30 + Math.random()*50;
+                            powerups.push(new Powerup(boss.x + Math.cos(angle)*dist, boss.y + Math.sin(angle)*dist, posTypes[Math.floor(Math.random()*6)]));
+                        }
+                        boss = null; getEl('boss-hud').classList.add('hidden'); currentLevel++; killsInLevel = 0;
+                    }
+                    continue;
+                }
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    const e = enemies[j];
+                    if (Math.hypot(b.x - e.x, b.y - e.y) < 30) {
+                        killsInLevel++; createExplosion(e.x, e.y, '#f40'); 
+                        if (Math.random() > 0.45) powerups.push(new Powerup(e.x, e.y, 'gold'));
+                        enemies.splice(j, 1); bullets.splice(i, 1); bulletHit = true; break; 
+                    }
+                }
+                if (bulletHit) continue;
+                for (let j = obstacles.length - 1; j >= 0; j--) {
+                    const o = obstacles[j];
+                    if (Math.hypot(b.x - o.x, b.y - o.y) < o.size) {
+                        o.hp -= (player.perks.rounds ? 25 : 10); bullets.splice(i, 1);
+                        if (o.hp <= 0) { 
+                            createExplosion(o.x, o.y, '#777'); 
+                            const count = 3 + Math.floor(Math.random()*6);
+                            // 修复：使用Math.floor确保整数资源
+                            const amountPerPack = Math.floor(RESOURCE_MULTIPLIER / count);
+                            for(let k=0; k<count; k++) {
+                                powerups.push(new Powerup(o.x + (Math.random()-0.5)*40, o.y + (Math.random()-0.5)*40, o.metal, amountPerPack)); 
+                            }
+                            obstacles.splice(j, 1); 
+                        }
+                        bulletHit = true; break; 
+                    }
+                }
+            }
+            if (!player.inBase) {
+                for (let i = enemyBullets.length - 1; i >= 0; i--) { if (Math.hypot(enemyBullets[i].x - player.x, enemyBullets[i].y - player.y) < 20) { player.health -= 15; enemyBullets.splice(i, 1); } }
+                for (let i = obstacles.length - 1; i >= 0; i--) { if (Math.hypot(obstacles[i].x - player.x, obstacles[i].y - player.y) < player.size + obstacles[i].size/2) { player.health -= 30; createExplosion(obstacles[i].x, obstacles[i].y, '#777'); obstacles.splice(i, 1); } }
+                for (let i = enemies.length - 1; i >= 0; i--) { if (Math.hypot(enemies[i].x - player.x, enemies[i].y - player.y) < 30) { player.health -= 20; createExplosion(enemies[i].x, enemies[i].y, '#f40'); enemies.splice(i, 1); } }
+            }
+            for (let i = powerups.length - 1; i >= 0; i--) {
+                const p = powerups[i];
+                if (Math.hypot(player.x - p.x, player.y - p.y) < 40) {
+                    const qty = p.quantity || 1;
+                    if (p.type === 'multi') player.multiShot++; 
+                    else if (p.type === 'speed') player.fireRateLevel += 2;
+                    else if (p.type === 'heal') player.health = Math.min(player.maxHealth, player.health + 20);
+                    else if (p.type === 'ammo') player.ammo += BigInt(1000);
+                    else if (p.type === 'fuel') player.fuel = Math.min(player.maxFuel, player.fuel + 500);
+                    else if (p.type === 'gold') player.gold += 50 * qty;
+                    else if (p.type === 'copper') player.inventory.copper += qty;
+                    else if (p.type === 'iron') player.inventory.iron += qty;
+                    else if (p.type === 'uranium') player.inventory.uranium += qty;
+                    powerups.splice(i, 1);
+                }
+            }
+        }
+
+        function updateHUD() {
+            safeUpdateText('level-val', currentLevel);
+            safeUpdateWidth('health-bar', Math.max(0, player.health / player.maxHealth * 100));
+            getEl('ammo-display').innerText = "弹药: " + player.ammo.toString();
+            getEl('fuel-display').innerText = "燃料: " + Math.floor(player.fuel) + "ml";
+            
+            // 新增：电量条
+            safeUpdateWidth('battery-bar', Math.max(0, player.battery / player.maxBattery * 100));
+            
+            safeUpdateText('gold-val', player.gold);
+            safeUpdateText('nuke-count', player.nukes);
+            safeUpdateText('inv-copper', player.inventory.copper);
+            safeUpdateText('inv-iron', player.inventory.iron);
+            safeUpdateText('inv-uranium', player.inventory.uranium);
+            safeUpdateText('kill-progress', killsInLevel);
+            safeUpdateText('kill-target', 5 + currentLevel * 5);
+            
+            const sa = getEl('status-alert');
+            const overlay = getEl('darkness-overlay');
+            const criticalOverlay = getEl('critical-overlay');
+            const backupOverlay = getEl('backup-overlay');
+            const backupText = getEl('backup-countdown-text');
+            
+            let isCritical = false;
+            let statusText = "";
+            
+            // 电源状态显示
+            if (player.battery <= 0) {
+                if (player.backupTimer > 0) {
+                    backupOverlay.classList.remove('hidden');
+                    backupText.innerText = Math.ceil(player.backupTimer / 60);
+                    statusText = "备用电源启动！";
+                    isCritical = true;
+                } else {
+                    backupOverlay.classList.add('hidden');
+                    statusText = "系统完全停机！";
+                }
+            } else {
+                backupOverlay.classList.add('hidden');
+                // 常规警报
+                if (player.battery < 25) { statusText = "电力不足！"; isCritical = true; }
+                else if (player.fuel <= 50) { statusText = "燃料匮乏！"; isCritical = true; }
+                else if (player.health / player.maxHealth < 0.25) { statusText = "机体受损严重！"; isCritical = true; }
+            }
+            
+            if (isCritical || player.battery <= 0) {
+                sa.classList.remove('hidden');
+                sa.innerText = statusText;
+            } else {
+                sa.classList.add('hidden');
+            }
+            
+            // 红色闪烁遮罩
+            if (isCritical) {
+                criticalOverlay.classList.add('critical-active');
+                criticalOverlay.style.opacity = 1;
+            } else {
+                criticalOverlay.classList.remove('critical-active');
+                criticalOverlay.style.opacity = 0;
+            }
+            
+            // 黑暗遮罩
+            if (player.battery <= 0 && player.backupTimer > 0) {
+                overlay.style.opacity = 0.5; // 半暗
+            } else if (player.battery <= 0 && player.backupTimer <= 0) {
+                overlay.style.opacity = 0.9; // 极暗
+            } else {
+                overlay.style.opacity = 0;
+            }
+            
+            if (player.inBase) getEl('base-hint').classList.remove('hidden'); else getEl('base-hint').classList.add('hidden');
+        }
+
+        function gameLoop() {
+            if (gameState !== 'playing') { loopId = null; return; }
+            ctx.fillStyle = 'rgba(5, 5, 5, 0.4)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            frameCount++;
+            const target = 5 + currentLevel * 5;
+            if (killsInLevel < target) {
+                if (frameCount % 60 === 0) enemies.push(new Enemy());
+                if (frameCount % 80 === 0) obstacles.push(new Obstacle()); 
+            } else if (!boss) { 
+                enemies = []; boss = new Boss(currentLevel); getEl('boss-hud').classList.remove('hidden'); 
+            }
+            player.update(); player.draw(); if (boss) { boss.update(); boss.draw(); }
+            const entities = [bullets, enemyBullets, enemies, obstacles, powerups, particles];
+            entities.forEach(arr => { for (let i = arr.length - 1; i >= 0; i--) { arr[i].update(); arr[i].draw(); if (arr[i].y > canvas.height + 150 || arr[i].y < -200 || (arr[i].alpha && arr[i].alpha <= 0)) arr.splice(i, 1); } });
+            checkCollisions(); updateHUD();
+            if (player.health <= 0) { player.health = 0; gameState = 'gameover'; getEl('game-over').classList.remove('hidden'); safeUpdateText('final-level', currentLevel); }
+            else { loopId = requestAnimationFrame(gameLoop); }
+        }
+
+        function startGame() {
+            initSize(); gameState = 'playing'; currentLevel = 1; killsInLevel = 0; boss = null;
+            player = new Player(); 
+            bullets = []; enemyBullets = []; enemies = []; obstacles = []; powerups = []; particles = [];
+            getEl('start-menu').classList.add('hidden'); getEl('hud').classList.remove('hidden'); 
+            getEl('base-portal').classList.remove('hidden'); getEl('game-over').classList.add('hidden');
+            if (!loopId) gameLoop();
+        }
+
+        function revivePlayer() {
+            if (player.gold >= REVIVE_COST) { player.gold -= REVIVE_COST; player.health = player.maxHealth; player.fuel = player.maxFuel; player.battery = player.maxBattery; player.backupTimer = player.maxBackupFrames; gameState = 'playing'; getEl('game-over').classList.add('hidden'); if (!loopId) gameLoop(); }
+            else { getEl('revive-fail-msg').classList.remove('hidden'); }
+        }
+
+        function goToBase(tab) { gameState = 'shop'; getEl('hud').classList.add('hidden'); getEl('base-portal').classList.add('hidden'); getEl('base-menu').classList.remove('hidden'); switchTab(tab); }
+        function switchTab(tab) { ['upgrade','mall','craft'].forEach(t => { getEl('section-'+t).classList.add('hidden'); getEl('tab-'+t).classList.replace('text-white', 'text-gray-400'); getEl('tab-'+t).classList.remove('bg-cyan-900/50'); }); getEl('section-'+tab).classList.remove('hidden'); getEl('tab-'+tab).classList.replace('text-gray-400', 'text-white'); getEl('tab-'+tab).classList.add('bg-cyan-900/50'); updateShopUI(); }
+        function returnToGame() { gameState = 'playing'; getEl('hud').classList.remove('hidden'); getEl('base-portal').classList.remove('hidden'); getEl('base-menu').classList.add('hidden'); if (!loopId) gameLoop(); }
+        
+        function updateShopUI() {
+            safeUpdateText('base-gold-val', player.gold);
+            getEl('shop-copper').innerText = player.inventory.copper;
+            getEl('shop-iron').innerText = player.inventory.iron;
+            getEl('shop-uranium').innerText = player.inventory.uranium;
+            getEl('up-hp-val').innerText = player.maxHealth;
+            getEl('up-fuel-val').innerText = player.maxFuel;
+            getEl('up-batt-val').innerText = player.maxBattery; 
+            getEl('btn-craft-nuke').disabled = (player.inventory.uranium < 50 || player.inventory.copper < 100 || player.inventory.iron < 100);
+            getEl('btn-craft-nano').disabled = (player.inventory.copper < 50 || player.inventory.iron < 10 || player.perks.nano);
+        }
+        function sell(type) { if (player.inventory[type] > 0) { player.gold += {copper:10,iron:50,uranium:200}[type]; player.inventory[type]--; updateShopUI(); updateHUD(); } }
+        function craft(type) { 
+            if (type==='nuke' && player.inventory.uranium>=50 && player.inventory.copper>=100 && player.inventory.iron>=100) { 
+                player.inventory.uranium-=50; player.inventory.copper-=100; player.inventory.iron-=100; player.nukes++; 
+            } else if (type==='nano' && player.inventory.copper>=50 && player.inventory.iron>=10) { 
+                player.inventory.copper-=50; player.inventory.iron-=10; player.perks.nano=true; 
+            }
+            getEl('craft-success').classList.remove('hidden'); setTimeout(()=>getEl('craft-success').classList.add('hidden'), 1000); updateShopUI(); updateHUD();
+        }
+        function upgrade(type) { 
+            let cost = 0;
+            if (type === 'hp') cost = 200;
+            else if (type === 'fuel') cost = 150;
+            else if (type === 'battery') cost = 180;
+            
+            if (player.gold >= cost) { 
+                player.gold -= cost; 
+                if (type === 'hp') player.maxHealth += 50; 
+                else if (type === 'fuel') player.maxFuel += 250; 
+                else if (type === 'battery') player.maxBattery += 50;
+                
+                player.health = player.maxHealth; 
+                player.fuel = player.maxFuel; 
+                player.battery = player.maxBattery;
+                updateShopUI(); updateHUD(); 
+            } 
+        }
+        function resetGame() { gameState='menu'; getEl('start-menu').classList.remove('hidden'); getEl('hud').classList.add('hidden'); getEl('base-portal').classList.add('hidden'); getEl('game-over').classList.add('hidden'); getEl('base-menu').classList.add('hidden'); loopId = null; }
+        
+        window.onload = () => { ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, canvas.width, canvas.height); };
+    </script>
+</body>
+</html>
